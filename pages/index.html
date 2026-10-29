@@ -209,7 +209,7 @@ tr.gone td{opacity:.55}
   <button data-v="rp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg><span data-i18n="nav.rp">Báo cáo</span></button>
   <button data-v="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span data-i18n="nav.st">Cài đặt</span></button>
  </nav>
- <div class="side-foot"><span id="who" class="who"></span><button class="btn" id="reset" data-i18n="logout">Đăng xuất</button></div>
+ <div class="side-foot"><span id="who" class="who"></span><button class="btn" id="chpw" data-i18n="chpw">Đổi mật khẩu</button><button class="btn" id="reset" data-i18n="logout">Đăng xuất</button></div>
 </aside>
 <main id="m"></main>
 </div>
@@ -265,7 +265,7 @@ function renderWho(){const w=document.getElementById('who');
  const nav=document.querySelector('.nav');let b=nav.querySelector('[data-v="ad"]');
  if(ME.role==='admin'&&!b){b=document.createElement('button');b.dataset.v='ad';b.innerHTML=ADMIN_ICON+'<span data-i18n="nav.ad"></span>';nav.insertBefore(b,nav.querySelector('[data-v="st"]'))}
  applyStatic()}
-async function loadMe(){try{const r=await fetch('/api/auth/me',{credentials:'same-origin'});if(r.ok){ME=await r.json();renderWho();render()}}catch(e){}}
+async function loadMe(){try{const r=await fetch('/api/auth/me',{credentials:'same-origin'});if(r.ok){ME=await r.json();if(ME.must_change_pw){location.replace('/change-password');return}renderWho();render()}}catch(e){}}
 applyStatic();loadMe();
 const typing=()=>{const e=document.activeElement;return !!(e&&e.closest&&e.closest('main')&&/^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName))};
 function updDot(){const seen=+sessionStorage.getItem('lantern-ev-seen')||0,un=S.events.filter(e=>e.t>seen).length,d=document.getElementById('evdot');if(d)d.hidden=!un||!LP.get('evBadge')}
@@ -623,6 +623,7 @@ document.getElementById('cdok').onclick=async()=>{const b=document.getElementByI
  try{await api('/admin/users/'+deleting.id,{method:'DELETE'});cd.close();await loadUsers()}
  catch(err){cerr.textContent=err.message;cerr.classList.add('show');b.disabled=false}};
 document.getElementById('reset').onclick=logout;
+document.getElementById('chpw').onclick=()=>{location.href='/change-password'};
 /* thay đổi cài đặt: áp dụng ngay, giữ nguyên vị trí focus để dùng bàn phím liên tục */
 LP.onChange(k=>{
  const f=document.activeElement,keep=f&&f.dataset&&f.dataset.set?{s:f.dataset.set,v:f.dataset.val,b:f.tagName==='BUTTON'}:null;

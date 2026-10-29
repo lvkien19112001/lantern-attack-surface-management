@@ -679,16 +679,26 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
-    if request.url.path in ("/", "/login", "/register", "/verify", "/forgot", "/reset") or request.url.path.startswith("/api/"):
+    if request.url.path in ("/", "/login", "/register", "/verify", "/forgot", "/reset", "/change-password") or request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
 @app.get("/", include_in_schema=False)
 def home(request: Request):
+    u = auth.user_from_request(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    if u["must_change_pw"]:  # admin mặc định vừa tạo: phải đổi mật khẩu trước
+        return RedirectResponse("/change-password", status_code=303)
+    return _page("index.html")
+
+
+@app.get("/change-password", include_in_schema=False)
+def change_password_page(request: Request):
     if not auth.user_from_request(request):
         return RedirectResponse("/login", status_code=303)
-    return _page("index.html")
+    return _page("change-password.html")
 
 
 @app.get("/login", include_in_schema=False)
