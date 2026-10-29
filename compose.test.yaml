@@ -1,0 +1,14 @@
+# Phòng thử nghiệm: OWASP Juice Shop, ứng dụng web CỐ TÌNH có lỗi để thử Lantern.
+# Chạy kèm file compose.yaml chính:
+#   docker compose -f compose.yaml -f compose.test.yaml up -d
+# Rồi trong Lantern thêm tài sản tên miền:  juice.test
+# Dừng và xóa khi thử xong:
+#   docker compose -f compose.yaml -f compose.test.yaml rm -sf juice
+services:
+  juice:
+    image: bkimminich/juice-shop
+    ports: ["127.0.0.1:3000:3000"]         # chỉ mở trên máy bạn: http://localhost:3000
+    networks:
+      default:
+        aliases: [juice.test]              # tên Lantern sẽ quét; chỉ container cùng mạng mới thấy tên này
+    restart: "no"

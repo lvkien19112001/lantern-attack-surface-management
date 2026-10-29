@@ -1,0 +1,9 @@
+services:
+  lantern:
+    build: .
+    ports: ["127.0.0.1:8080:8000"]   # chỉ mở trên máy local, muốn public thì đặt sau Caddy/Nginx có HTTPS
+    env_file: .env
+    environment:
+      LANTERN_DB: /data/lantern.db
+    volumes: ["./data:/data"]
+    restart: unless-stopped
