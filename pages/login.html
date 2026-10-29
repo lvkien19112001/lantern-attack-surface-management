@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đăng nhập - Lantern</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=2">
+<link rel="shortcut icon" href="/static/favicon.ico?v=2">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="/static/prefs.js?v=3"></script>
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<aside class="side"><div class="in">
+ <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="var(--acc)"/></svg>Lantern</div>
+ <h2>Biết rõ bề mặt tấn công của bạn trước khi kẻ khác biết.</h2>
+ <p>Theo dõi tên miền, dải IP, cổng mở và thay đổi giữa các lần quét tại một nơi.</p>
+ <svg class="radar" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--acc)" stop-opacity="0"/><stop offset="1" stop-color="var(--acc)" stop-opacity=".35"/></linearGradient></defs>
+  <circle cx="100" cy="100" r="90" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="60" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="30" fill="none" stroke="var(--ring)" stroke-width="1.5"/>
+  <path class="sweep" d="M100 100 L190 100 A90 90 0 0 0 165 36 Z" fill="url(#g)"/>
+  <circle cx="140" cy="62" r="5" fill="var(--crit)"/><circle cx="62" cy="128" r="5" fill="var(--ok)"/><circle cx="118" cy="146" r="5" fill="var(--med)"/></svg>
+</div></aside>
+<main class="form"><div class="card">
+ <h1>Đăng nhập</h1>
+ <p class="sub">Chào mừng quay lại. Nhập thông tin tài khoản để tiếp tục.</p>
+ <div class="okmsg" id="okmsg" role="status">Đặt lại mật khẩu thành công. Hãy đăng nhập bằng mật khẩu mới.</div>
+ <div class="err" id="err" role="alert" aria-live="assertive"></div>
+ <form id="f" novalidate>
+  <label class="f"><span class="l">Tên đăng nhập</span><span class="inp"><input type="text" name="username" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="30" required autofocus></span></label>
+  <label class="f"><span class="l">Mật khẩu</span><span class="inp pw"><input type="password" name="password" id="pw" autocomplete="current-password" maxlength="128" required><button type="button" class="eye" id="eye" aria-label="Hiện mật khẩu" aria-pressed="false">Hiện</button></span></label>
+  <p class="fp"><a href="/forgot">Quên mật khẩu?</a></p>
+  <button class="btn" id="go">Đăng nhập</button>
+ </form>
+ <p class="alt">Chưa có tài khoản? <a href="/register">Đăng ký</a></p>
+ <div class="note">Chỉ quét tài sản bạn sở hữu hoặc được phép kiểm tra bằng văn bản.</div>
+</div></main>
+<script>
+const f=document.getElementById('f'),err=document.getElementById('err'),go=document.getElementById('go'),pw=document.getElementById('pw'),eye=document.getElementById('eye');
+function showErr(m,el){err.textContent=m;err.classList.add('show');document.querySelectorAll('input').forEach(i=>i.removeAttribute('aria-invalid'));if(el){el.setAttribute('aria-invalid','true');el.focus()}}
+(function(){const q=new URLSearchParams(location.search),ok=document.getElementById('okmsg');
+ if(q.get('registered')==='1'){
+  ok.textContent='Đăng ký thành công! Hãy đăng nhập bằng tài khoản vừa tạo.';ok.classList.add('show');
+  try{const u=sessionStorage.getItem('lantern_new_user');if(u){f.username.value=u;sessionStorage.removeItem('lantern_new_user');pw.focus()}}catch(_){}
+ }else if(q.get('reset')==='1')ok.classList.add('show');
+})();
+eye.onclick=()=>{const show=pw.type==='password';pw.type=show?'text':'password';eye.textContent=show?'Ẩn':'Hiện';eye.setAttribute('aria-pressed',show);eye.setAttribute('aria-label',show?'Ẩn mật khẩu':'Hiện mật khẩu')};
+f.addEventListener('submit',async e=>{e.preventDefault();err.classList.remove('show');
+ const username=f.username.value.trim(),password=pw.value;
+ if(!username)return showErr('Vui lòng nhập tên đăng nhập.',f.username);
+ if(!password)return showErr('Vui lòng nhập mật khẩu.',pw);
+ go.disabled=true;go.textContent='Đang đăng nhập…';
+ try{
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username,password})});
+  if(r.ok){location.replace('/');return}
+  let m='Đăng nhập thất bại ('+r.status+').';try{const j=await r.json();if(typeof j.detail==='string')m=j.detail}catch(_){}
+  showErr(m,r.status===429?null:pw);
+ }catch(_){showErr('Không kết nối được máy chủ. Kiểm tra lại server rồi thử lại.')}
+ go.disabled=false;go.textContent='Đăng nhập'});
+</script>
+</body>
+</html>

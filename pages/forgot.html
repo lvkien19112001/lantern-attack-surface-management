@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quên mật khẩu - Lantern</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=2">
+<link rel="shortcut icon" href="/static/favicon.ico?v=2">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="/static/prefs.js?v=3"></script>
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<aside class="side"><div class="in">
+ <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="var(--acc)"/></svg>Lantern</div>
+ <h2>Quên mật khẩu? Đặt lại chỉ trong vài bước.</h2>
+ <p>Nhập email đã đăng ký, chúng tôi sẽ gửi mã OTP để bạn đặt mật khẩu mới.</p>
+ <svg class="radar" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--acc)" stop-opacity="0"/><stop offset="1" stop-color="var(--acc)" stop-opacity=".35"/></linearGradient></defs>
+  <circle cx="100" cy="100" r="90" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="60" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="30" fill="none" stroke="var(--ring)" stroke-width="1.5"/>
+  <path class="sweep" d="M100 100 L190 100 A90 90 0 0 0 165 36 Z" fill="url(#g)"/>
+  <circle cx="140" cy="62" r="5" fill="var(--crit)"/><circle cx="62" cy="128" r="5" fill="var(--ok)"/><circle cx="118" cy="146" r="5" fill="var(--med)"/></svg>
+</div></aside>
+<main class="form"><div class="card">
+ <h1>Quên mật khẩu</h1>
+ <p class="sub">Nhập email bạn đã dùng để đăng ký tài khoản.</p>
+ <div class="err" id="err" role="alert" aria-live="assertive"></div>
+ <form id="f" novalidate>
+  <label class="f"><span class="l">Email</span><span class="inp"><input type="email" name="email" id="email" autocomplete="email" maxlength="254" required autofocus></span></label>
+  <button class="btn" id="go">Gửi mã OTP</button>
+ </form>
+ <p class="alt"><a href="/login">Quay lại đăng nhập</a></p>
+</div></main>
+<script>
+const f=document.getElementById('f'),err=document.getElementById('err'),go=document.getElementById('go');
+function showErr(m,el){err.textContent=m;err.classList.add('show');if(el){el.setAttribute('aria-invalid','true');el.focus()}}
+f.addEventListener('submit',async e=>{e.preventDefault();err.classList.remove('show');f.email.removeAttribute('aria-invalid');
+ const email=f.email.value.trim();
+ if(!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email))return showErr('Email không hợp lệ.',f.email);
+ go.disabled=true;go.textContent='Đang gửi…';
+ try{
+  const r=await fetch('/api/auth/forgot',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({email})});
+  if(r.ok){location.replace('/reset');return}
+  let m='Yêu cầu thất bại ('+r.status+').';try{const j=await r.json();if(typeof j.detail==='string')m=j.detail}catch(_){}
+  showErr(m);
+ }catch(_){showErr('Không kết nối được máy chủ. Kiểm tra lại server rồi thử lại.')}
+ go.disabled=false;go.textContent='Gửi mã OTP'});
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đặt lại mật khẩu - Lantern</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=2">
+<link rel="shortcut icon" href="/static/favicon.ico?v=2">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="/static/prefs.js?v=3"></script>
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<aside class="side"><div class="in">
+ <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="var(--acc)"/></svg>Lantern</div>
+ <h2>Gần xong rồi, hãy chọn một mật khẩu mới.</h2>
+ <p>Nhập mã OTP trong email và mật khẩu mới. Sau khi đổi, bạn sẽ bị đăng xuất khỏi mọi thiết bị.</p>
+ <svg class="radar" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--acc)" stop-opacity="0"/><stop offset="1" stop-color="var(--acc)" stop-opacity=".35"/></linearGradient></defs>
+  <circle cx="100" cy="100" r="90" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="60" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="30" fill="none" stroke="var(--ring)" stroke-width="1.5"/>
+  <path class="sweep" d="M100 100 L190 100 A90 90 0 0 0 165 36 Z" fill="url(#g)"/>
+  <circle cx="140" cy="62" r="5" fill="var(--crit)"/><circle cx="62" cy="128" r="5" fill="var(--ok)"/><circle cx="118" cy="146" r="5" fill="var(--med)"/></svg>
+</div></aside>
+<main class="form"><div class="card">
+ <h1>Đặt lại mật khẩu</h1>
+ <p class="sub">Nếu email <span class="mail" id="mail">của bạn</span> có tài khoản, mã gồm 6 chữ số đã được gửi tới đó. Mã có hiệu lực trong 10 phút.</p>
+ <div class="err" id="err" role="alert" aria-live="assertive"></div>
+ <div class="okmsg" id="ok" role="status" aria-live="polite"></div>
+ <form id="f" novalidate>
+  <div class="otp" id="otp" role="group" aria-label="Mã OTP 6 chữ số">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="Chữ số 1" autofocus>
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 2">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 3">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 4">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 5">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 6">
+  </div>
+  <label class="f"><span class="l">Mật khẩu mới</span><span class="inp pw"><input type="password" name="password" id="pw" autocomplete="new-password" minlength="8" maxlength="128" required aria-describedby="pwh"><button type="button" class="eye" id="eye" aria-label="Hiện mật khẩu" aria-pressed="false">Hiện</button></span>
+   <span class="meter" id="meter" data-s="0" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="hint" id="pwh">Tối thiểu 8 ký tự. Nên dùng cụm từ dài, nhiều loại ký tự.</span></label>
+  <label class="f"><span class="l">Nhập lại mật khẩu mới</span><span class="inp"><input type="password" name="confirm" autocomplete="new-password" maxlength="128" required></span></label>
+  <button class="btn" id="go">Đặt lại mật khẩu</button>
+ </form>
+ <p class="alt">Chưa nhận được mã? <button type="button" class="linkbtn" id="resend" disabled>Gửi lại mã</button></p>
+ <p class="alt"><a href="/login">Quay lại đăng nhập</a></p>
+ <div class="note">Hãy kiểm tra cả thư mục Spam/Junk nếu không thấy email trong hộp thư đến.</div>
+</div></main>
+<script>
+const f=document.getElementById('f'),err=document.getElementById('err'),okm=document.getElementById('ok'),go=document.getElementById('go'),
+ box=document.getElementById('otp'),ins=[...box.querySelectorAll('input')],resend=document.getElementById('resend'),mail=document.getElementById('mail'),
+ pw=document.getElementById('pw'),eye=document.getElementById('eye'),meter=document.getElementById('meter');
+let timer=null,busy=false,exhausted=false;
+
+function showErr(m,el){okm.classList.remove('show');err.textContent=m;err.classList.add('show');if(el){el.setAttribute('aria-invalid','true');el.focus()}}
+function showOk(m){err.classList.remove('show');box.dataset.bad='0';okm.textContent=m;okm.classList.add('show')}
+function clearMsg(){err.classList.remove('show');okm.classList.remove('show');box.dataset.bad='0';document.querySelectorAll('input').forEach(i=>i.removeAttribute('aria-invalid'))}
+async function errMsg(r,fallback){try{const j=await r.json();if(typeof j.detail==='string')return j.detail}catch(_){}return fallback+' ('+r.status+').'}
+const code=()=>ins.map(i=>i.value).join('');
+function clearBoxes(){ins.forEach(i=>i.value='');ins[0].focus()}
+
+eye.onclick=()=>{const show=pw.type==='password';pw.type=show?'text':'password';eye.textContent=show?'Ẩn':'Hiện';eye.setAttribute('aria-pressed',show);eye.setAttribute('aria-label',show?'Ẩn mật khẩu':'Hiện mật khẩu')};
+function strength(p){if(!p)return 0;let s=0;if(p.length>=8)s++;if(p.length>=12)s++;if(/[a-z]/.test(p)&&/[A-Z]/.test(p))s++;if(/\d/.test(p)&&/[^A-Za-z0-9]/.test(p))s++;if(/^\d+$/.test(p))s=Math.min(s,1);return Math.max(1,Math.min(4,s))}
+pw.addEventListener('input',()=>{meter.dataset.s=pw.value?strength(pw.value):0});
+
+function tick(sec){
+ clearInterval(timer);
+ if(exhausted){resend.disabled=true;resend.textContent='Đã hết lượt gửi lại';return}
+ const end=Date.now()+sec*1000;
+ const draw=()=>{const left=Math.ceil((end-Date.now())/1000);
+  if(left<=0){clearInterval(timer);resend.disabled=false;resend.textContent='Gửi lại mã'}
+  else{resend.disabled=true;resend.textContent='Gửi lại mã ('+left+'s)'}};
+ draw();timer=setInterval(draw,500);
+}
+
+ins.forEach((el,i)=>{
+ el.addEventListener('input',()=>{el.value=el.value.replace(/\D/g,'').slice(-1);if(el.value&&i<5)ins[i+1].focus();else if(el.value&&i===5)pw.focus()});
+ el.addEventListener('keydown',e=>{
+  if(e.key==='Backspace'&&!el.value&&i>0){ins[i-1].focus();ins[i-1].value=''}
+  else if(e.key==='ArrowLeft'&&i>0)ins[i-1].focus();
+  else if(e.key==='ArrowRight'&&i<5)ins[i+1].focus();
+ });
+ el.addEventListener('focus',()=>el.select());
+ el.addEventListener('paste',e=>{
+  e.preventDefault();
+  const d=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);
+  if(!d)return;
+  d.split('').forEach((c,k)=>{ins[k].value=c});
+  if(d.length===6)pw.focus();else ins[d.length].focus();
+ });
+});
+
+f.addEventListener('submit',async e=>{
+ e.preventDefault();if(busy)return;clearMsg();
+ const otp=code(),password=pw.value;
+ if(otp.length!==6)return showErr('Vui lòng nhập đủ 6 chữ số của mã OTP.',ins[Math.min(otp.length,5)]);
+ if(password.length<8)return showErr('Mật khẩu phải có ít nhất 8 ký tự.',pw);
+ if(password!==f.confirm.value)return showErr('Mật khẩu nhập lại không khớp.',f.confirm);
+ busy=true;go.disabled=true;go.textContent='Đang xử lý…';
+ try{
+  const r=await fetch('/api/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({otp,password})});
+  if(r.ok){location.replace('/login?reset=1');return}
+  const m=await errMsg(r,'Đặt lại mật khẩu thất bại');
+  if(r.status===410){showErr(m);setTimeout(()=>location.replace('/forgot'),2500);return}
+  if(/OTP/.test(m)){box.dataset.bad='1';showErr(m);clearBoxes()}else showErr(m,pw);
+ }catch(_){showErr('Không kết nối được máy chủ. Kiểm tra lại server rồi thử lại.')}
+ busy=false;go.disabled=false;go.textContent='Đặt lại mật khẩu';
+});
+
+resend.addEventListener('click',async()=>{
+ resend.disabled=true;clearMsg();
+ try{
+  const r=await fetch('/api/auth/forgot/resend',{method:'POST',credentials:'same-origin'});
+  if(r.ok){const j=await r.json();if(j.left<=0)exhausted=true;showOk('Nếu email có tài khoản, mã mới đã được gửi. Mã cũ không còn dùng được.');clearBoxes();tick(j.resend_in);return}
+  const m=await errMsg(r,'Gửi lại thất bại');
+  if(r.status===410){showErr(m);setTimeout(()=>location.replace('/forgot'),2500);return}
+  showErr(m);
+ }catch(_){showErr('Không kết nối được máy chủ.')}
+ resend.disabled=false;
+});
+
+fetch('/api/auth/forgot/status',{credentials:'same-origin'}).then(r=>{
+ if(r.status===404){location.replace('/forgot');return null}
+ return r.ok?r.json():null;
+}).then(j=>{
+ if(!j)return;
+ mail.textContent=j.email;
+ if(j.resend_in<0){exhausted=true;tick(0)}else tick(j.resend_in);
+}).catch(()=>{tick(0)});
+</script>
+</body>
+</html>

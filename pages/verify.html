@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Xác thực email - Lantern</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=2">
+<link rel="shortcut icon" href="/static/favicon.ico?v=2">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="/static/prefs.js?v=3"></script>
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<aside class="side"><div class="in">
+ <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="var(--acc)"/></svg>Lantern</div>
+ <h2>Chỉ còn một bước để xác nhận đây là email của bạn.</h2>
+ <p>Mã OTP giúp đảm bảo chỉ chủ sở hữu email mới tạo được tài khoản.</p>
+ <svg class="radar" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--acc)" stop-opacity="0"/><stop offset="1" stop-color="var(--acc)" stop-opacity=".35"/></linearGradient></defs>
+  <circle cx="100" cy="100" r="90" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="60" fill="none" stroke="var(--ring)" stroke-width="1.5"/><circle cx="100" cy="100" r="30" fill="none" stroke="var(--ring)" stroke-width="1.5"/>
+  <path class="sweep" d="M100 100 L190 100 A90 90 0 0 0 165 36 Z" fill="url(#g)"/>
+  <circle cx="140" cy="62" r="5" fill="var(--crit)"/><circle cx="62" cy="128" r="5" fill="var(--ok)"/><circle cx="118" cy="146" r="5" fill="var(--med)"/></svg>
+</div></aside>
+<main class="form"><div class="card">
+ <div id="done" hidden>
+  <div class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+  <h1>Đăng ký thành công!</h1>
+  <p class="sub" role="status">Tài khoản <span class="mail" id="newuser"></span> đã được tạo. Đang chuyển tới trang đăng nhập…</p>
+  <a class="btn gologin" href="/login?registered=1">Đăng nhập ngay</a>
+ </div>
+ <div id="main">
+ <h1>Xác thực email</h1>
+ <p class="sub">Chúng tôi đã gửi mã gồm 6 chữ số tới <span class="mail" id="mail">email của bạn</span>. Mã có hiệu lực trong 10 phút.</p>
+ <div class="err" id="err" role="alert" aria-live="assertive"></div>
+ <div class="okmsg" id="ok" role="status" aria-live="polite"></div>
+ <form id="f" novalidate>
+  <div class="otp" id="otp" role="group" aria-label="Mã OTP 6 chữ số">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="Chữ số 1" autofocus>
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 2">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 3">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 4">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 5">
+   <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Chữ số 6">
+  </div>
+  <button class="btn" id="go">Xác thực</button>
+ </form>
+ <p class="alt">Chưa nhận được mã? <button type="button" class="linkbtn" id="resend" disabled>Gửi lại mã</button></p>
+ <p class="alt"><a href="/register">Đăng ký bằng thông tin khác</a></p>
+ <div class="note">Hãy kiểm tra cả thư mục Spam/Junk nếu không thấy email trong hộp thư đến.</div>
+ </div>
+</div></main>
+<script>
+const f=document.getElementById('f'),err=document.getElementById('err'),okm=document.getElementById('ok'),go=document.getElementById('go'),
+ box=document.getElementById('otp'),ins=[...box.querySelectorAll('input')],resend=document.getElementById('resend'),mail=document.getElementById('mail');
+let timer=null,busy=false,exhausted=false;
+
+function showErr(m){okm.classList.remove('show');err.textContent=m;err.classList.add('show');box.dataset.bad='1'}
+function showOk(m){err.classList.remove('show');box.dataset.bad='0';okm.textContent=m;okm.classList.add('show')}
+function clearMsg(){err.classList.remove('show');okm.classList.remove('show');box.dataset.bad='0'}
+async function errMsg(r,fallback){try{const j=await r.json();if(typeof j.detail==='string')return j.detail}catch(_){}return fallback+' ('+r.status+').'}
+const code=()=>ins.map(i=>i.value).join('');
+function clearBoxes(){ins.forEach(i=>i.value='');ins[0].focus()}
+
+// ---- bộ đếm gửi lại
+function tick(sec){
+ clearInterval(timer);
+ if(exhausted){resend.disabled=true;resend.textContent='Đã hết lượt gửi lại';return}
+ const end=Date.now()+sec*1000;
+ const draw=()=>{const left=Math.ceil((end-Date.now())/1000);
+  if(left<=0){clearInterval(timer);resend.disabled=false;resend.textContent='Gửi lại mã'}
+  else{resend.disabled=true;resend.textContent='Gửi lại mã ('+left+'s)'}};
+ draw();timer=setInterval(draw,500);
+}
+
+// ---- nhập 6 ô
+ins.forEach((el,i)=>{
+ el.addEventListener('input',()=>{
+  el.value=el.value.replace(/\D/g,'').slice(-1);
+  if(el.value&&i<5)ins[i+1].focus();
+  if(code().length===6)submit();
+ });
+ el.addEventListener('keydown',e=>{
+  if(e.key==='Backspace'&&!el.value&&i>0){ins[i-1].focus();ins[i-1].value=''}
+  else if(e.key==='ArrowLeft'&&i>0)ins[i-1].focus();
+  else if(e.key==='ArrowRight'&&i<5)ins[i+1].focus();
+ });
+ el.addEventListener('focus',()=>el.select());
+ el.addEventListener('paste',e=>{
+  e.preventDefault();
+  const d=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);
+  if(!d)return;
+  d.split('').forEach((c,k)=>{ins[k].value=c});
+  ins[Math.min(d.length,5)].focus();
+  if(d.length===6)submit();
+ });
+});
+
+async function submit(){
+ if(busy)return;
+ const otp=code();
+ if(otp.length!==6)return showErr('Vui lòng nhập đủ 6 chữ số.');
+ busy=true;clearMsg();go.disabled=true;go.textContent='Đang xác thực…';
+ try{
+  const r=await fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({otp})});
+  if(r.ok){
+   const j=await r.json();
+   try{sessionStorage.setItem('lantern_new_user',j.username)}catch(_){}
+   document.getElementById('main').hidden=true;
+   document.getElementById('newuser').textContent=j.username;
+   document.getElementById('done').hidden=false;
+   document.title='Đăng ký thành công - Lantern';
+   setTimeout(()=>location.replace('/login?registered=1'),2500);
+   return;
+  }
+  const m=await errMsg(r,'Xác thực thất bại');
+  if(r.status===410){showErr(m);setTimeout(()=>location.replace('/register'),2500);return}
+  showErr(m);clearBoxes();
+ }catch(_){showErr('Không kết nối được máy chủ. Kiểm tra lại server rồi thử lại.')}
+ busy=false;go.disabled=false;go.textContent='Xác thực';
+}
+f.addEventListener('submit',e=>{e.preventDefault();submit()});
+
+resend.addEventListener('click',async()=>{
+ resend.disabled=true;clearMsg();
+ try{
+  const r=await fetch('/api/auth/resend',{method:'POST',credentials:'same-origin'});
+  if(r.ok){const j=await r.json();if(j.left<=0)exhausted=true;showOk('Đã gửi mã mới. Mã cũ không còn dùng được.');clearBoxes();tick(j.resend_in);return}
+  const m=await errMsg(r,'Gửi lại thất bại');
+  if(r.status===410){showErr(m);setTimeout(()=>location.replace('/register'),2500);return}
+  showErr(m);
+ }catch(_){showErr('Không kết nối được máy chủ.')}
+ resend.disabled=false;
+});
+
+// ---- tải trạng thái ban đầu
+fetch('/api/auth/pending',{credentials:'same-origin'}).then(r=>{
+ if(r.status===404){location.replace('/register');return null}
+ return r.ok?r.json():null;
+}).then(j=>{
+ if(!j)return;
+ mail.textContent=j.email;
+ if(j.resend_in<0){exhausted=true;tick(0)}else tick(j.resend_in);
+}).catch(()=>{tick(0)});
+</script>
+</body>
+</html>
