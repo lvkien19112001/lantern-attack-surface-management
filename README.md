@@ -55,8 +55,9 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 ### Install and run
 
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/lvkien19112001/lantern-attack-surface-management.git
+cd lantern-attack-surface-management
+
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
