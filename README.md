@@ -10,7 +10,6 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 - **Subdomain discovery** with [subfinder](https://github.com/projectdiscovery/subfinder) (optional; without it only the root domain is checked)
 - **Port scanning and service fingerprinting** with [nmap](https://nmap.org/)
 - **Web checks**: HTTP, TLS, and security header inspection
-- **Web application scanning** through [OWASP ZAP](https://www.zaproxy.org/) (optional): spider plus passive scan by default; active scanning (payload injection) is off unless explicitly enabled. If ZAP is not running, this step is skipped without affecting the rest of the scan
 - **CVE matching**: detected service names and versions are looked up on the [NVD API](https://nvd.nist.gov/developers/vulnerabilities), filtered by a minimum CVSS score. Only software name and version are sent to NVD, never your IPs or domains
 - **Scheduled scanning** per asset (hourly, 6h, 12h, daily, weekly) with missed-run catch-up
 - **Change tracking** between scans and findings you can close or reopen
@@ -37,7 +36,7 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 | Backend | Python, FastAPI, Uvicorn |
 | Database | SQLite (automatic migrations) |
 | Frontend | Static HTML / CSS / JavaScript |
-| Recon | subfinder, nmap, OWASP ZAP (optional) |
+| Recon | subfinder, nmap (optional) |
 | Vulnerability data | NVD API |
 | Email | SMTP (falls back to printing OTP in the terminal in dev mode) |
 | Deployment | Docker, Windows background service scripts |
@@ -49,7 +48,6 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 - Python 3.10+
 - [nmap](https://nmap.org/download.html) in your `PATH`
 - (Optional) [subfinder](https://github.com/projectdiscovery/subfinder) in your `PATH`
-- (Optional) [OWASP ZAP](https://www.zaproxy.org/) running as a daemon for web application scanning, e.g. `zap.sh -daemon -port 8090` (see ZAP variables below)
 - (Optional) a free [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) for roughly 10x faster CVE lookups
 
 ### Install and run
@@ -82,11 +80,6 @@ Copy `.env.example` to `.env` and edit it. Never commit `.env`.
 | `LANTERN_NVD_API_KEY` | NVD API key | empty |
 | `LANTERN_CVE_MIN_SCORE` | Minimum CVSS score to report | `7.0` |
 | `LANTERN_CVE_MAX_LOOKUPS` | Max NVD lookups per scan | `15` |
-| `LANTERN_WEBVULN` | Enable ZAP web scanning (1/0) | `1` |
-| `LANTERN_ZAP_API` | ZAP API address | `http://127.0.0.1:8090` |
-| `LANTERN_ZAP_ACTIVE_SCAN` | Set `1` to enable active scan (intrusive, authorized targets only) | `0` |
-| `LANTERN_ZAP_MAX_URLS` | Max web hosts sent to ZAP per scan | `20` |
-| `LANTERN_ZAP_MIN_RISK` | Minimum ZAP risk level to report | `Low` |
 | `LANTERN_SECURE_COOKIE` | Set `1` when served over HTTPS | `0` |
 | `LANTERN_SMTP_HOST` / `PORT` / `USER` / `PASSWORD` / `FROM` / `SECURITY` | SMTP settings for OTP emails (`starttls`, `ssl`, or `none`) | empty |
 | `LANTERN_ADMIN_USERNAME` / `PASSWORD` / `EMAIL` / `NAME` | Optionally create or promote an admin at startup. Remove the password after the first run | unset |
@@ -151,7 +144,6 @@ app/
   mailer.py     SMTP email sending
   scanner.py    subfinder, HTTP/TLS/header checks, nmap
   vulns.py      CVE lookup by service version (NVD)
-  webvuln.py    web application scanning via OWASP ZAP (optional)
   reports.py    HTML / CSV / JSON report builder
   db.py         SQLite with automatic migrations
 pages/          HTML pages (index, login, register, verify, forgot, reset)
