@@ -15,7 +15,8 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 - **Change tracking** between scans and findings you can close or reopen
 - **Reports** in HTML (printable to PDF), CSV (formula-injection safe, opens in Excel), and JSON
 - **Multi-user** with role-based access (admin / user); each user only sees their own assets and findings
-- **Authentication**: email OTP registration, login, and password reset
+- **Authentication**: email OTP registration, login, password reset, and change password while logged in
+- **Default admin account** created automatically on first run with a random password (see [First login](#first-login))
 - **User preferences**: light/dark theme, accent color, density, Vietnamese / English UI
 
 ## Security design
@@ -25,7 +26,9 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 - OTPs are stored hashed, expire after 10 minutes, lock after 5 wrong attempts, and are single-use
 - Login lockout after 5 failed attempts (per username + IP pair) for 15 minutes
 - Rate limit of 8 OTP requests per IP per 15 minutes
-- Password reset logs the user out of all devices
+- Password reset and password change log the user out of all other devices
+- First-run admin gets a random per-installation password (no hard-coded default in the source) and must change it before using the app; the API is blocked until then
+- Changing a password requires the current password, and wrong attempts count toward the login lockout
 - Admin safeguards enforced server-side (cannot delete yourself or demote the last admin)
 - Known trade-off: the password reset form tells users when an email is not registered ("account does not exist"). This improves usability but allows account enumeration, so it is limited by the rate limit above.
 
@@ -36,7 +39,7 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 | Backend | Python, FastAPI, Uvicorn |
 | Database | SQLite (automatic migrations) |
 | Frontend | Static HTML / CSS / JavaScript |
-| Recon | subfinder, nmap (optional) |
+| Recon | subfinder, nmap |
 | Vulnerability data | NVD API |
 | Email | SMTP (falls back to printing OTP in the terminal in dev mode) |
 | Deployment | Docker, Windows background service scripts |
@@ -47,7 +50,7 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 
 - Python 3.10+
 - [nmap](https://nmap.org/download.html) in your `PATH`
-- (Optional) [subfinder](https://github.com/projectdiscovery/subfinder) in your `PATH`
+- (Optional) [subfinder](https://github.com/projectdiscovery/subfinder) in your `PATH`. Requires Go: `go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest`, then make sure `$(go env GOPATH)/bin` is in your `PATH`
 - (Optional) a free [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) for roughly 10x faster CVE lookups
 
 ### Install and run
@@ -55,7 +58,6 @@ Lantern is a self-hosted web tool that tracks an organization's external assets 
 ```bash
 git clone https://github.com/lvkien19112001/lantern-attack-surface-management.git
 cd lantern-attack-surface-management
-
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -66,7 +68,28 @@ cp .env.example .env             # Windows: copy .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000 and click **Register**. The first registered account becomes the admin. If `LANTERN_SMTP_HOST` is empty, no real email is sent and the OTP is printed in the terminal.
+Open http://127.0.0.1:8000 and log in with the admin account created on first run (see below). If `LANTERN_SMTP_HOST` is empty, no real email is sent and OTP codes are printed in the terminal.
+
+### First login
+
+On the very first start (when the database has no accounts), Lantern creates an **admin** account with a **random password generated for your installation**. Nothing is hard-coded in the source, so every copy gets a different password.
+
+1. Start the server. Look at the terminal output for a box like this:
+   ```
+   ==============================================================
+   [Lantern] First admin account created:
+       Username: admin
+       Password: <random 16 characters>
+   ==============================================================
+   ```
+2. The same credentials are saved in `initial-admin-password.txt` next to the database file (`./data/` with Docker, or the project folder otherwise). With Docker you can also run `docker compose logs lantern`.
+3. Open http://127.0.0.1:8000 and log in as `admin` with that password.
+4. Lantern immediately asks you to **set a new password**. Until you do, nothing else in the app is accessible. After you change it, `initial-admin-password.txt` is deleted automatically.
+5. Optional: in **Account management**, change the admin email to a real address so password reset emails reach you (the default is `admin@lantern.local`).
+
+Other users can then self-register at `/register`, or the admin can create them. You can change your password at any time with the **Change password** button at the bottom of the sidebar.
+
+Prefer to choose the admin credentials yourself? Set `LANTERN_ADMIN_USERNAME` and `LANTERN_ADMIN_PASSWORD` in `.env` before the first start (remove the password line afterwards). In that case no random password is generated.
 
 ### Configuration
 
@@ -117,6 +140,7 @@ All endpoints except `/api/health` and `/api/auth/*` require a session cookie. I
 |--------|------|-------------|
 | POST | `/api/auth/register`, `/verify`, `/resend` | Registration with email OTP |
 | POST | `/api/auth/login`, `/logout` | Session login / logout |
+| POST | `/api/auth/change-password` | Change password `{"current_password", "new_password"}` |
 | POST | `/api/auth/forgot`, `/forgot/resend`, `/reset` | Password reset with OTP |
 | GET/POST | `/api/assets`, `/api/assets/bulk` | List / add assets |
 | POST | `/api/scans` | Start a scan `{"asset_id": 1}` |

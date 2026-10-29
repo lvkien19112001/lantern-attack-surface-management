@@ -38,12 +38,25 @@ Nếu để trống `LANTERN_SMTP_HOST`, server chạy chế độ phát triển
 ```
 uvicorn app.main:app --reload
 ```
-Mở http://127.0.0.1:8000, bấm "Đăng ký" để tạo tài khoản đầu tiên (nhập OTP gửi về email, hoặc xem trong terminal nếu chưa cấu hình SMTP).
+Mở http://127.0.0.1:8000 và đăng nhập bằng tài khoản admin được tạo ở lần chạy đầu (xem mục **Đăng nhập lần đầu** bên dưới).
 
 **Nâng cấp từ bản cũ (dùng API key):** `lantern.db` cũ được tự động nâng cấp khi khởi động, không mất dữ liệu.
 Các tài sản đã có sẽ thuộc về **tài khoản đầu tiên đăng ký**, nên hãy tự đăng ký tài khoản đó trước khi mời người khác.
 Tài khoản đã tồn tại (đăng ký bằng email trước đây) được tự gán `username` lấy từ phần trước dấu `@` của email; đăng nhập bằng username đó.
 Biến `LANTERN_API_KEY` trong `.env` không còn được dùng, có thể xóa.
+
+## Đăng nhập lần đầu
+Ở lần khởi động đầu tiên (database chưa có tài khoản nào), Lantern tự tạo tài khoản **admin** với **mật khẩu ngẫu nhiên riêng cho từng bản cài**. Mật khẩu không nằm cố định trong mã nguồn nên mỗi người tải về sẽ có một mật khẩu khác nhau.
+
+1. Chạy server, xem trong terminal sẽ có khung thông báo `Tên đăng nhập: admin` và `Mật khẩu: <16 ký tự ngẫu nhiên>`.
+2. Thông tin này cũng được lưu trong file `initial-admin-password.txt` cạnh file database (thư mục `data/` nếu dùng Docker, còn lại là thư mục dự án). Với Docker có thể xem bằng `docker compose logs lantern`.
+3. Vào http://127.0.0.1:8000, đăng nhập bằng `admin` và mật khẩu đó.
+4. Lantern **bắt buộc đặt mật khẩu mới** ngay lần đầu, chưa đổi thì chưa dùng được chức năng nào khác. Đổi xong file `initial-admin-password.txt` tự bị xóa.
+5. Nên vào **Quản lý tài khoản** đổi email của admin thành email thật để nhận được thư quên mật khẩu (mặc định là `admin@lantern.local`).
+
+Người dùng khác tự đăng ký ở `/register`, hoặc admin tạo cho họ. Bất cứ lúc nào cũng đổi được mật khẩu bằng nút **Đổi mật khẩu** ở cuối cột menu bên trái.
+
+Muốn tự chọn tài khoản admin: đặt `LANTERN_ADMIN_USERNAME` và `LANTERN_ADMIN_PASSWORD` trong `.env` trước lần chạy đầu (nhớ xóa dòng mật khẩu sau đó). Khi đó không có mật khẩu ngẫu nhiên nào được tạo.
 
 ## Chạy ngầm để lịch quét tự động luôn hoạt động (Windows)
 Lịch quét nằm trong chính server Lantern, nên chỉ chạy khi server đang chạy. Để không phải tự mở phần mềm:
@@ -106,7 +119,7 @@ Lưu ý: cài đặt gắn với trình duyệt chứ chưa gắn với tài kho
 - Quy tắc an toàn (kiểm tra ở server): không tự xóa mình, không tự đổi role của mình, không xóa/hạ quyền admin cuối cùng. Đổi mật khẩu của người khác sẽ đăng xuất họ khỏi các thiết bị khác.
 - Xóa tài khoản sẽ xóa kèm tài sản, phát hiện, lịch sử quét và phiên đăng nhập của tài khoản đó.
 - Cách có tài khoản admin:
-  1. Tài khoản **đăng ký đầu tiên** trên hệ thống mới là admin.
+  1. Hệ thống mới tự tạo tài khoản `admin` với mật khẩu ngẫu nhiên (xem mục *Đăng nhập lần đầu*).
   2. DB cũ: tài khoản **tạo sớm nhất** được tự nâng thành admin khi nâng cấp.
   3. Hoặc đặt `LANTERN_ADMIN_USERNAME` + `LANTERN_ADMIN_PASSWORD` trong `.env` (xem `.env.example`) để tạo/nâng quyền khi khởi động.
 - Mỗi người (kể cả admin) hiện chỉ thấy tài sản, phát hiện, lần quét của chính mình.
@@ -141,6 +154,7 @@ Mọi endpoint (trừ `/api/health` và `/api/auth/*` ở trên) cần đăng nh
 | GET/POST | /api/admin/users | (admin) Danh sách / tạo tài khoản `{"username","name","email","password","role"}` |
 | PATCH/DELETE | /api/admin/users/{id} | (admin) Sửa / xóa tài khoản |
 | POST | /api/auth/login | Đăng nhập `{"username","password"}` |
+| POST | /api/auth/change-password | Đổi mật khẩu khi đang đăng nhập `{"current_password","new_password"}` |
 | POST | /api/auth/logout | Đăng xuất |
 | GET | /api/auth/me | Người dùng hiện tại |
 | GET | /api/assets | Danh sách tài sản |
@@ -188,4 +202,4 @@ static/i18n.js   bảng chuỗi tiếng Việt / English và hàm t()
 - Tự đóng phát hiện khi lần quét sau không còn thấy
 - Cảnh báo qua Telegram/email khi lịch quét phát hiện thay đổi
 - Trang subdomain và đồ thị tài sản, so sánh thay đổi giữa các lần quét
-- Đổi mật khẩu khi đang đăng nhập, tắt đăng ký công khai
+- Tắt đăng ký công khai
