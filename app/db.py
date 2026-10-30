@@ -20,8 +20,7 @@ CREATE TABLE IF NOT EXISTS users(
   username TEXT,                   -- tên đăng nhập, luôn lưu chữ thường (xem migration bên dưới)
   role TEXT NOT NULL DEFAULT 'user',  -- admin | user
   pw_hash TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  must_change_pw INTEGER NOT NULL DEFAULT 0  -- 1 = bắt buộc đổi mật khẩu ở lần đăng nhập kế tiếp
+  created_at INTEGER NOT NULL
 );
 -- Đăng ký đang chờ xác thực OTP. Chỉ khi nhập đúng mã mới tạo dòng trong users.
 CREATE TABLE IF NOT EXISTS pending_signups(
@@ -145,6 +144,19 @@ CREATE TABLE IF NOT EXISTS cve_cache(
   data TEXT NOT NULL,
   fetched REAL NOT NULL
 );
+-- Credential SSH để quét có xác thực (authenticated scan), tối đa 1 bộ mỗi tài sản.
+-- secret_enc / passphrase_enc được mã hóa bằng app/crypto.py (Fernet), không lưu dạng chữ thường.
+CREATE TABLE IF NOT EXISTS ssh_credentials(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL UNIQUE REFERENCES assets(id) ON DELETE CASCADE,
+  port INTEGER NOT NULL DEFAULT 22,
+  username TEXT NOT NULL,
+  auth_type TEXT NOT NULL,            -- password | key
+  secret_enc TEXT NOT NULL,           -- mật khẩu, hoặc nội dung private key (PEM), đã mã hóa
+  passphrase_enc TEXT,                -- passphrase của private key (nếu có), đã mã hóa
+  created REAL NOT NULL,
+  updated REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -186,11 +198,10 @@ def init():
                               ("asset_hosts", "server", "TEXT NOT NULL DEFAULT ''")):
             if col not in [r["name"] for r in c.execute(f"PRAGMA table_info({tbl})")]:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
-        # Dọn các phát hiện web cũ (khóa "web:*") còn sót lại từ phiên bản trước
+        # Đã bỏ tính năng quét lỗ hổng web (ZAP): xóa các phát hiện cũ có khóa "web:*"
         c.execute("DELETE FROM findings WHERE fkey LIKE 'web:%'")
         _migrate_username(c)
         _migrate_role(c)
-        _migrate_must_change(c)
         scols = [r["name"] for r in c.execute("PRAGMA table_info(scans)")]
         kcols = [r["name"] for r in c.execute("PRAGMA table_info(schedules)")]
         for col in ("at_min", "weekday", "tz"):
@@ -231,13 +242,6 @@ def _migrate_role(c):
         c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
     if c.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] == 0:
         c.execute("UPDATE users SET role='admin' WHERE id=(SELECT MIN(id) FROM users)")
-
-
-def _migrate_must_change(c):
-    """DB cũ chưa có cột users.must_change_pw (cờ bắt buộc đổi mật khẩu)."""
-    cols = [r["name"] for r in c.execute("PRAGMA table_info(users)")]
-    if "must_change_pw" not in cols:
-        c.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
 
 
 def rows(sql, args=()):

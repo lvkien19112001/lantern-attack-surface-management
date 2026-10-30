@@ -216,8 +216,16 @@ def port_scan(targets, notes, services=None, cancel=None):
                                  "version": sv.get("version", "") if sv is not None else "", "cpe": cpe})
             if st is not None and st.get("state") == "open" and port in RISKY:
                 svc, sev = RISKY[port]
+                # "mở ra internet" chỉ chính xác khi IP là IP công khai; IP nội bộ (10/8, 172.16/12,
+                # 192.168/16...) thì chỉ đúng là "mở, thấy được từ máy chạy Lantern" (có thể chỉ trong LAN).
+                # Muốn biết có THỰC SỰ lộ ra Internet công cộng hay không vẫn cần quét từ một vị trí
+                # bên ngoài mạng nội bộ (VPS ngoài, 4G...), Lantern không tự xác minh được điều đó.
+                try:
+                    scope = "nội bộ (LAN)" if ipaddress.ip_address(addr.get("addr")).is_private else "Internet"
+                except (ValueError, AttributeError):
+                    scope = "Internet"  # không xác định được IP -> giữ cảnh báo mức cao nhất (an toàn hơn)
                 out.append({"host": name, "fkey": f"port:{port}",
-                            "title": f"Cổng {port} ({svc}) mở ra internet ({name})", "sev": sev})
+                            "title": f"Cổng {port} ({svc}) mở, thấy được từ phạm vi {scope} ({name})", "sev": sev})
     return out, True
 
 

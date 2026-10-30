@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response  # noqa: 
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from . import admin, auth, db, reports, scanner  # noqa: E402
+from . import admin, auth, crypto, db, reports, scanner, sshscan  # noqa: E402
 from .auth import current_user  # noqa: E402
 
 
@@ -55,6 +55,14 @@ class BulkAssetIn(BaseModel):
 
 class ScanIn(BaseModel):
     asset_id: int
+
+
+class SshCredIn(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    port: int = Field(default=22, ge=1, le=65535)
+    auth_type: str = Field(pattern="^(password|key)$")
+    secret: str = Field(min_length=1, max_length=20000)   # mật khẩu, hoặc nội dung private key PEM
+    passphrase: str = Field(default="", max_length=500)   # chỉ dùng khi auth_type=key và key có mã hóa
 
 
 class FindingPatch(BaseModel):
@@ -141,6 +149,65 @@ def delete_asset(asset_id: int, u: dict = Depends(current_user)):
                   "(SELECT group_id FROM assets WHERE group_id IS NOT NULL)", (u["id"],))
 
 
+# ---------- credential SSH (quét có xác thực) ----------
+def _owned_asset(asset_id, uid):
+    a = db.one("SELECT * FROM assets WHERE id=? AND user_id=?", (asset_id, uid))
+    if not a:
+        raise HTTPException(404, "Không tìm thấy tài sản.")
+    return a
+
+
+@router.get("/assets/{asset_id}/ssh-credential")
+def get_ssh_credential(asset_id: int, u: dict = Depends(current_user)):
+    """Không bao giờ trả về secret/passphrase đã lưu, chỉ cho biết đã cấu hình hay chưa."""
+    _owned_asset(asset_id, u["id"])
+    r = db.one("SELECT username, port, auth_type, updated FROM ssh_credentials WHERE asset_id=?", (asset_id,))
+    if not r:
+        return {"configured": False}
+    return {"configured": True, "username": r["username"], "port": r["port"],
+            "auth_type": r["auth_type"], "t": _ms(r["updated"])}
+
+
+@router.put("/assets/{asset_id}/ssh-credential", status_code=200)
+def set_ssh_credential(asset_id: int, body: SshCredIn, u: dict = Depends(current_user)):
+    _owned_asset(asset_id, u["id"])
+    if sshscan.paramiko is None:
+        raise HTTPException(503, "Máy chủ chưa cài paramiko (pip install paramiko).")
+    if not crypto.available():
+        raise HTTPException(503, "Máy chủ chưa cài cryptography (pip install cryptography).")
+    now = time.time()
+    secret_enc = crypto.encrypt(body.secret)
+    pass_enc = crypto.encrypt(body.passphrase) if body.passphrase else None
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO ssh_credentials(asset_id,port,username,auth_type,secret_enc,passphrase_enc,created,updated) "
+            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET "
+            "port=excluded.port, username=excluded.username, auth_type=excluded.auth_type, "
+            "secret_enc=excluded.secret_enc, passphrase_enc=excluded.passphrase_enc, updated=excluded.updated",
+            (asset_id, body.port, body.username, body.auth_type, secret_enc, pass_enc, now, now))
+    return {"configured": True}
+
+
+@router.delete("/assets/{asset_id}/ssh-credential", status_code=204)
+def delete_ssh_credential(asset_id: int, u: dict = Depends(current_user)):
+    _owned_asset(asset_id, u["id"])
+    with db.conn() as c:
+        c.execute("DELETE FROM ssh_credentials WHERE asset_id=?", (asset_id,))
+
+
+def _ssh_cred_for_scan(asset_id):
+    """Giải mã credential để dùng ngay khi quét; KHÔNG bao giờ trả ra ngoài API."""
+    r = db.one("SELECT * FROM ssh_credentials WHERE asset_id=?", (asset_id,))
+    if not r:
+        return None
+    try:
+        return {"username": r["username"], "port": r["port"], "auth_type": r["auth_type"],
+                "secret": crypto.decrypt(r["secret_enc"]),
+                "passphrase": crypto.decrypt(r["passphrase_enc"]) if r["passphrase_enc"] else ""}
+    except crypto.InvalidToken:
+        return None   # khóa mã hóa đã đổi/hỏng: coi như chưa cấu hình, không chặn quét mạng
+
+
 MAX_BULK = 200
 
 
@@ -204,6 +271,35 @@ def delete_group(group_id: int, u: dict = Depends(current_user)):
         c.execute("UPDATE assets SET group_id=NULL WHERE group_id=? AND user_id=?", (group_id, u["id"]))
         if c.execute("DELETE FROM asset_groups WHERE id=? AND user_id=?", (group_id, u["id"])).rowcount == 0:
             raise HTTPException(404, "Không tìm thấy nhóm.")
+
+
+@router.put("/groups/{group_id}/ssh-credential")
+def set_group_ssh_credential(group_id: int, body: SshCredIn, u: dict = Depends(current_user)):
+    """Gán CÙNG một credential SSH cho mọi tài sản trong nhóm (vd danh sách server nội bộ
+    dùng chung 1 tài khoản quét). Chỉ gán cho tài sản kind=ip hoặc cidr (domain thì không SSH được
+    thẳng vào tên miền theo nghĩa quét hạ tầng, nên bỏ qua, không báo lỗi)."""
+    if not db.one("SELECT id FROM asset_groups WHERE id=? AND user_id=?", (group_id, u["id"])):
+        raise HTTPException(404, "Không tìm thấy nhóm.")
+    if sshscan.paramiko is None:
+        raise HTTPException(503, "Máy chủ chưa cài paramiko (pip install paramiko).")
+    if not crypto.available():
+        raise HTTPException(503, "Máy chủ chưa cài cryptography (pip install cryptography).")
+    members = db.rows("SELECT id, kind FROM assets WHERE group_id=? AND user_id=? AND kind IN ('ip','cidr')",
+                      (group_id, u["id"]))
+    if not members:
+        raise HTTPException(409, "Nhóm này không có tài sản dạng IP/dải IP nào.")
+    now = time.time()
+    secret_enc = crypto.encrypt(body.secret)
+    pass_enc = crypto.encrypt(body.passphrase) if body.passphrase else None
+    with db.conn() as c:
+        for m in members:
+            c.execute(
+                "INSERT INTO ssh_credentials(asset_id,port,username,auth_type,secret_enc,passphrase_enc,created,updated) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET "
+                "port=excluded.port, username=excluded.username, auth_type=excluded.auth_type, "
+                "secret_enc=excluded.secret_enc, passphrase_enc=excluded.passphrase_enc, updated=excluded.updated",
+                (m["id"], body.port, body.username, body.auth_type, secret_enc, pass_enc, now, now))
+    return {"applied": len(members)}
 
 
 def _finding_rows(uid):
@@ -421,6 +517,25 @@ def _run_scan(scan_id, asset_id, kind, name):
     try:
         findings, hosts, notes, extra = scanner.scan_asset(kind, name, cancel)
         scanner._check(cancel)      # bấm dừng đúng lúc vừa quét xong: bỏ kết quả
+        cred = _ssh_cred_for_scan(asset_id)
+        if cred is not None:
+            ssh_notes = []
+            try:
+                ssh_findings, ssh_hostinfo = sshscan.auth_scan(kind, name, cred, ssh_notes, cancel)
+                findings += ssh_findings
+                for h, info in ssh_hostinfo.items():
+                    extra["hostinfo"].setdefault(h, {"ip": "", "web": "", "server": ""})
+                    extra["hostinfo"][h]["os"] = info.get("os", "")
+                    extra["hostinfo"][h]["kernel"] = info.get("kernel", "")
+                    if h not in hosts:
+                        hosts.append(h)
+            except scanner.ScanCancelled:
+                raise
+            except Exception as e:  # noqa: BLE001  - lỗi SSH không được làm hỏng kết quả quét mạng đã có
+                ssh_notes.append(f"SSH-auth lỗi: {str(e)[:200]}")
+            if ssh_notes:
+                notes = (notes + "; " if notes else "") + "; ".join(ssh_notes)
+        scanner._check(cancel)
         now = time.time()
         with db.conn() as c:
             for f in findings:
@@ -679,26 +794,16 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
-    if request.url.path in ("/", "/login", "/register", "/verify", "/forgot", "/reset", "/change-password") or request.url.path.startswith("/api/"):
+    if request.url.path in ("/", "/login", "/register", "/verify", "/forgot", "/reset") or request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
 @app.get("/", include_in_schema=False)
 def home(request: Request):
-    u = auth.user_from_request(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    if u["must_change_pw"]:  # admin mặc định vừa tạo: phải đổi mật khẩu trước
-        return RedirectResponse("/change-password", status_code=303)
-    return _page("index.html")
-
-
-@app.get("/change-password", include_in_schema=False)
-def change_password_page(request: Request):
     if not auth.user_from_request(request):
         return RedirectResponse("/login", status_code=303)
-    return _page("change-password.html")
+    return _page("index.html")
 
 
 @app.get("/login", include_in_schema=False)

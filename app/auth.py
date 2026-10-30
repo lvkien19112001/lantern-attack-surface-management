@@ -6,7 +6,6 @@ import re
 import secrets
 import sqlite3
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -75,23 +74,17 @@ def user_from_request(request: Request):
     if not token:
         return None
     r = db.one(
-        "SELECT u.id,u.email,u.name,u.username,u.role,u.must_change_pw FROM sessions s JOIN users u ON u.id=s.user_id "
+        "SELECT u.id,u.email,u.name,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id "
         "WHERE s.token_hash=? AND s.expires_at>?",
         (_th(token), int(time.time())),
     )
     return r
 
 
-# Khi tài khoản còn cờ must_change_pw (vd. admin mặc định vừa tạo), chỉ cho gọi các API này
-MUST_CHANGE_ALLOWED = ("/api/auth/me", "/api/auth/logout", "/api/auth/change-password")
-
-
 def current_user(request: Request):
     u = user_from_request(request)
     if not u:
         raise HTTPException(401, "Chưa đăng nhập")
-    if u["must_change_pw"] and request.url.path not in MUST_CHANGE_ALLOWED:
-        raise HTTPException(403, "Bạn cần đổi mật khẩu trước khi tiếp tục")
     return u
 
 
@@ -107,7 +100,6 @@ def seed_admin():
     username = os.getenv("LANTERN_ADMIN_USERNAME", "").strip().lower()
     pw = os.getenv("LANTERN_ADMIN_PASSWORD", "")
     if not username or not pw:
-        _seed_default_admin()
         return
     email = os.getenv("LANTERN_ADMIN_EMAIL", "").strip().lower() or f"{username}@lantern.local"
     name = os.getenv("LANTERN_ADMIN_NAME", "").strip() or "Administrator"
@@ -134,49 +126,6 @@ def seed_admin():
         print(f"[Lantern] Đã tạo tài khoản admin '{username}'. Nên xóa LANTERN_ADMIN_PASSWORD khỏi .env sau lần chạy đầu.", flush=True)
 
 
-DEFAULT_ADMIN_USERNAME = "admin"
-INITIAL_PW_FILE = Path(db.DB_PATH).parent / "initial-admin-password.txt"  # cạnh file DB (Docker: thư mục data/)
-
-
-def _seed_default_admin():
-    """Lần chạy đầu tiên (DB chưa có tài khoản nào): tạo admin mặc định với mật khẩu NGẪU NHIÊN riêng cho từng
-    bản cài. Mật khẩu in ra terminal và ghi vào initial-admin-password.txt (không đưa lên Git). Tài khoản bị
-    bắt buộc đổi mật khẩu ở lần đăng nhập đầu. Không dùng mật khẩu cố định trong mã nguồn vì ai cũng đọc được."""
-    with db.conn() as c:
-        if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] != 0:
-            return
-        pw = secrets.token_urlsafe(12)  # 16 ký tự, đủ mạnh và gõ được
-        cur = c.execute(
-            "INSERT INTO users(email,name,username,role,pw_hash,created_at,must_change_pw) "
-            "VALUES(?,?,?,'admin',?,?,1)",
-            (f"{DEFAULT_ADMIN_USERNAME}@lantern.local", "Administrator", DEFAULT_ADMIN_USERNAME, hash_pw(pw), int(time.time())),
-        )
-        c.execute("UPDATE assets SET user_id=? WHERE user_id IS NULL", (cur.lastrowid,))
-    try:
-        INITIAL_PW_FILE.write_text(
-            f"Lantern - tài khoản admin ban đầu\nTên đăng nhập: {DEFAULT_ADMIN_USERNAME}\nMật khẩu: {pw}\n"
-            "Bạn sẽ phải đổi mật khẩu ở lần đăng nhập đầu tiên. File này tự bị xóa sau khi đổi.\n",
-            encoding="utf-8",
-        )
-        try:
-            os.chmod(INITIAL_PW_FILE, 0o600)
-        except OSError:
-            pass
-    except OSError:
-        pass  # không ghi được file thì vẫn còn bản in ra terminal
-    bar = "=" * 62
-    print(f"\n{bar}\n[Lantern] Đã tạo tài khoản admin lần đầu:\n    Tên đăng nhập: {DEFAULT_ADMIN_USERNAME}\n"
-          f"    Mật khẩu:      {pw}\n    (cũng được lưu trong {INITIAL_PW_FILE.name}; bạn sẽ phải đổi mật khẩu khi đăng nhập)\n{bar}\n",
-          flush=True)
-
-
-def _drop_initial_pw_file():
-    try:
-        INITIAL_PW_FILE.unlink()
-    except OSError:
-        pass
-
-
 # ---------- schema ----------
 class RegisterIn(BaseModel):
     username: str
@@ -196,11 +145,6 @@ class ForgotIn(BaseModel):
 class ResetIn(BaseModel):
     otp: str
     password: str
-
-
-class ChangePwIn(BaseModel):
-    current_password: str
-    new_password: str
 
 
 class LoginIn(BaseModel):
@@ -436,22 +380,26 @@ def _set_reset_cookie(response: Response, token: str):
 
 @router.post("/forgot")
 def forgot(body: ForgotIn, request: Request, response: Response, bg: BackgroundTasks):
-    """Bước 1: nhận email, gửi OTP nếu email có tài khoản. Email chưa đăng ký thì báo 404 "Tài khoản này không tồn tại"."""
+    """Bước 1: nhận email, gửi OTP nếu email có tài khoản.
+
+    CẢNH BÁO BẢO MẬT: endpoint này báo rõ 404 "Email không tồn tại" khi email chưa đăng ký,
+    theo yêu cầu của chủ dự án. Khác với hành vi mặc định ban đầu (trả lời giống hệt dù email
+    có tồn tại hay không), cách làm này để lộ cho người ngoài biết EMAIL NÀO ĐÃ ĐĂNG KÝ trong
+    hệ thống (user enumeration) -> kẻ tấn công dò được danh sách tài khoản thật để nhắm phishing/
+    brute-force đúng người. Đã cân nhắc và chấp nhận đánh đổi này."""
     email = body.email.strip().lower()
     if len(email) > 254 or not EMAIL_RE.match(email):
         raise HTTPException(400, "Email không hợp lệ")
     now = int(time.time())
-    mail_job = None
-    # Đếm giới hạn gửi TRƯỚC khi kiểm tra tài khoản và commit riêng, để các lần thử email không tồn tại
-    # vẫn bị tính vào giới hạn (chống dò email hàng loạt).
-    with db.conn() as c:
-        _rate_limit_sends(c, request, now)
-        exists = c.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone()
-    if not exists:
-        raise HTTPException(404, "Tài khoản này không tồn tại")
     with db.conn() as c:
         c.execute("DELETE FROM password_resets WHERE created_at < ?", (now - PENDING_TTL,))
+        # Rate-limit theo IP TRƯỚC khi kiểm tra tồn tại, để không bị dùng làm công cụ dò email
+        # hàng loạt không giới hạn (dù giờ có báo tồn tại hay không, vẫn phải giới hạn tốc độ thử).
+        _rate_limit_sends(c, request, now)
         user = c.execute("SELECT name FROM users WHERE email=?", (email,)).fetchone()
+        if not user:
+            raise HTTPException(404, "Email không tồn tại trong hệ thống.")
+        mail_job = None
         cur = request.cookies.get(RESET_COOKIE)
         old = c.execute("SELECT * FROM password_resets WHERE email=?", (email,)).fetchone()
         cooling = bool(old) and now - old["last_sent"] < RESEND_COOLDOWN
@@ -461,13 +409,12 @@ def forgot(body: ForgotIn, request: Request, response: Response, bg: BackgroundT
             token = secrets.token_urlsafe(32)
             if cooling:
                 # Trình duyệt khác trong thời gian chờ: không gửi thêm mail (chống spam hộp thư)
-                otp_hash, last_sent, sends = secrets.token_hex(32), old["last_sent"], old["sends"]
+                otp_hash, last_sent, sends = old["otp_hash"], old["last_sent"], old["sends"]
             else:
                 code = _new_otp()
-                otp_hash = _otp_hash(token, code) if user else secrets.token_hex(32)
+                otp_hash = _otp_hash(token, code)
                 last_sent, sends = now, 1
-                if user:
-                    mail_job = (email, user["name"], code)
+                mail_job = (email, user["name"], code)
             if cur:
                 c.execute("DELETE FROM password_resets WHERE token_hash=?", (_th(cur),))
             c.execute("DELETE FROM password_resets WHERE email=?", (email,))
@@ -561,7 +508,7 @@ def reset_password(body: ResetIn, request: Request, response: Response):
             raise HTTPException(400, bad)
         if pw.lower() == user["username"]:
             raise HTTPException(400, "Mật khẩu quá dễ đoán")  # chưa tiêu hao mã, người dùng nhập lại được
-        c.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (new_hash, user["id"]))
+        c.execute("UPDATE users SET pw_hash=? WHERE id=?", (new_hash, user["id"]))
         c.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))  # đăng xuất mọi thiết bị
         c.execute("DELETE FROM password_resets WHERE email=?", (row["email"],))
         # Mở khóa đăng nhập (đang bị khóa vì sai nhiều lần) cho tài khoản này
@@ -581,7 +528,7 @@ def login(body: LoginIn, request: Request, response: Response):
         fails = c.execute("SELECT COUNT(*) FROM login_fails WHERE key=?", (key,)).fetchone()[0]
         if fails >= MAX_FAILS:
             raise HTTPException(429, "Thử sai quá nhiều lần. Vui lòng đợi 15 phút rồi thử lại.")
-        row = c.execute("SELECT id,email,name,username,role,pw_hash,must_change_pw FROM users WHERE username=?", (username,)).fetchone()
+        row = c.execute("SELECT id,email,name,username,role,pw_hash FROM users WHERE username=?", (username,)).fetchone()
         ok = verify_pw(body.password[:128], row["pw_hash"] if row else DUMMY_HASH) and row is not None
         if not ok:
             c.execute("INSERT INTO login_fails(key,t) VALUES(?,?)", (key, now))
@@ -589,8 +536,7 @@ def login(body: LoginIn, request: Request, response: Response):
             raise HTTPException(401, "Tên đăng nhập hoặc mật khẩu không đúng")
         c.execute("DELETE FROM login_fails WHERE key=?", (key,))
         start_session(c, row["id"], response)
-        return {"id": row["id"], "email": row["email"], "name": row["name"], "username": row["username"], "role": row["role"],
-                "must_change_pw": bool(row["must_change_pw"])}
+        return {"id": row["id"], "email": row["email"], "name": row["name"], "username": row["username"], "role": row["role"]}
 
 
 @router.post("/logout", status_code=204)
@@ -604,38 +550,6 @@ def logout(request: Request, response: Response):
     return response
 
 
-@router.post("/change-password")
-def change_password(body: ChangePwIn, request: Request, user=Depends(current_user)):
-    """Đổi mật khẩu khi đang đăng nhập: phải nhập đúng mật khẩu hiện tại. Đăng xuất các thiết bị khác
-    (giữ phiên hiện tại), gỡ cờ bắt buộc đổi mật khẩu."""
-    cur_pw, new_pw = body.current_password[:128], body.new_password
-    if not (8 <= len(new_pw) <= 128):
-        raise HTTPException(400, "Mật khẩu mới phải từ 8 đến 128 ký tự")
-    if new_pw.isdigit() or new_pw.lower() in (user["username"], user["email"]):
-        raise HTTPException(400, "Mật khẩu mới quá dễ đoán")
-    if new_pw == cur_pw:
-        raise HTTPException(400, "Mật khẩu mới phải khác mật khẩu hiện tại")
-    key = _client_key(request, user["username"])
-    now = int(time.time())
-    new_hash = hash_pw(new_pw)  # băm trước khi mở transaction
-    token = request.cookies.get(COOKIE)
-    with db.conn() as c:
-        c.execute("DELETE FROM login_fails WHERE t < ?", (now - FAIL_WINDOW,))
-        if c.execute("SELECT COUNT(*) FROM login_fails WHERE key=?", (key,)).fetchone()[0] >= MAX_FAILS:
-            raise HTTPException(429, "Thử sai quá nhiều lần. Vui lòng đợi 15 phút rồi thử lại.")
-        row = c.execute("SELECT pw_hash FROM users WHERE id=?", (user["id"],)).fetchone()
-        if not row or not verify_pw(cur_pw, row["pw_hash"]):
-            c.execute("INSERT INTO login_fails(key,t) VALUES(?,?)", (key, now))
-            c.commit()
-            raise HTTPException(400, "Mật khẩu hiện tại không đúng")
-        c.execute("DELETE FROM login_fails WHERE key=?", (key,))
-        c.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (new_hash, user["id"]))
-        c.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (user["id"], _th(token or "")))
-    if user["must_change_pw"] or user["username"] == DEFAULT_ADMIN_USERNAME:
-        _drop_initial_pw_file()
-    return {"ok": True}
-
-
 @router.get("/me")
 def me(user=Depends(current_user)):
-    return {**user, "must_change_pw": bool(user["must_change_pw"])}
+    return user
